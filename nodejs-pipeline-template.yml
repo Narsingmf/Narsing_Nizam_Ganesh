@@ -1,0 +1,371 @@
+# Node.js Application Pipeline Template
+# This is a reusable YAML pipeline template for Node.js applications
+# Features:
+# - Build, Test, and Deploy stages
+# - SonarQube for code quality
+# - Snyk for security scanning
+# - Centralized secrets management
+# - Approval gates
+# - Slack notifications
+# - Parallel jobs
+# - Blue-green deployment strategy
+
+# Note: This template is designed to be adaptable to different CI/CD platforms
+# (GitHub Actions, GitLab CI, Azure DevOps, Jenkins, etc.)
+# Comments are provided to help with adaptation to specific platforms
+
+# Pipeline Variables
+# These would typically be defined in your CI/CD platform's UI or in a separate file
+variables:
+  # Application settings
+  APP_NAME: "nodejs-app"
+  NODE_VERSION: "18"
+  
+  # Docker settings
+  DOCKER_REGISTRY: "your-registry.example.com"
+  DOCKER_IMAGE: "${DOCKER_REGISTRY}/${APP_NAME}"
+  
+  # Deployment settings
+  DEPLOYMENT_ENVIRONMENT: "production"
+  
+  # SonarQube settings
+  SONAR_HOST_URL: "https://sonarqube.example.com"
+  SONAR_PROJECT_KEY: "${APP_NAME}"
+  
+  # Snyk settings
+  SNYK_ORG: "your-organization"
+  
+  # Slack settings
+  SLACK_CHANNEL: "#deployments"
+
+# Stages definition
+stages:
+  - prepare
+  - build
+  - test
+  - security_scan
+  - quality_scan
+  - approval
+  - deploy
+  - post_deploy
+
+# Cache configuration for node_modules
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+
+# Job templates that can be reused
+.node_template: &node_template
+  image: node:${NODE_VERSION}
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+.docker_template: &docker_template
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+
+# Secret Management
+# This section demonstrates how to use centralized secrets management
+# Different CI/CD platforms have different ways to handle secrets:
+# - GitHub Actions: Use secrets in GitHub repository settings
+# - GitLab CI: Use CI/CD variables in GitLab project settings
+# - Azure DevOps: Use variable groups and Azure Key Vault
+# - Jenkins: Use credentials plugin or external secret managers
+
+# The jobs below assume secrets are available as environment variables
+# In a real implementation, you would use your platform's secure method
+
+# ======= PREPARE STAGE =======
+prepare:
+  <<: *node_template
+  stage: prepare
+  script:
+    - echo "Node.js version: $(node --version)"
+    - echo "NPM version: $(npm --version)"
+    - npm ci
+  artifacts:
+    paths:
+      - node_modules/
+    expire_in: 1 day
+
+# ======= BUILD STAGE =======
+build:
+  <<: *node_template
+  stage: build
+  needs: [prepare]
+  script:
+    - npm run build
+    # If your app uses webpack, rollup, or another bundler
+    - echo "Building application..."
+  artifacts:
+    paths:
+      - dist/
+      - build/
+    expire_in: 1 day
+
+# Build Docker image in parallel with the main build
+build_docker:
+  <<: *docker_template
+  stage: build
+  needs: [prepare]
+  script:
+    # Access to Docker registry credentials securely
+    - echo "${DOCKER_REGISTRY_PASSWORD}" | docker login ${DOCKER_REGISTRY} -u ${DOCKER_REGISTRY_USER} --password-stdin
+    - docker build -t ${DOCKER_IMAGE}:${CI_COMMIT_SHA} .
+    - docker push ${DOCKER_IMAGE}:${CI_COMMIT_SHA}
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+
+# ======= TEST STAGE =======
+# Unit tests run in parallel with integration and e2e tests
+unit_tests:
+  <<: *node_template
+  stage: test
+  needs: [build]
+  script:
+    - npm run test:unit
+  artifacts:
+    paths:
+      - coverage/
+    reports:
+      junit: junit-test-results.xml
+    expire_in: 1 week
+
+# Integration tests
+integration_tests:
+  <<: *node_template
+  stage: test
+  needs: [build]
+  script:
+    - npm run test:integration
+  artifacts:
+    reports:
+      junit: junit-integration-results.xml
+    expire_in: 1 week
+
+# End-to-end tests
+e2e_tests:
+  <<: *node_template
+  stage: test
+  needs: [build]
+  script:
+    - npm run test:e2e
+  artifacts:
+    paths:
+      - cypress/screenshots/
+      - cypress/videos/
+    reports:
+      junit: junit-e2e-results.xml
+    expire_in: 1 week
+  # E2E tests can be resource-intensive, so we might want to run them only on specific branches
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+    - if: $CI_COMMIT_BRANCH =~ /^release\/.*/
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ======= SECURITY SCAN STAGE =======
+# Snyk security scan for dependencies
+snyk_scan:
+  <<: *node_template
+  stage: security_scan
+  needs: [prepare]
+  script:
+    # Install Snyk CLI
+    - npm install -g snyk
+    # Authenticate with Snyk using the API token from secure storage
+    - snyk auth ${SNYK_TOKEN}
+    # Run Snyk to check for vulnerabilities in dependencies
+    - snyk test --org=${SNYK_ORG} --json > snyk-results.json || true
+    # Monitor the project in Snyk
+    - snyk monitor --org=${SNYK_ORG}
+  artifacts:
+    paths:
+      - snyk-results.json
+    expire_in: 1 week
+  allow_failure: true  # Don't fail the pipeline, but report issues
+
+# Snyk container scan for Docker image
+snyk_container_scan:
+  <<: *node_template
+  stage: security_scan
+  needs: [build_docker]
+  script:
+    # Install Snyk CLI
+    - npm install -g snyk
+    # Authenticate with Snyk
+    - snyk auth ${SNYK_TOKEN}
+    # Run Snyk container test
+    - snyk container test ${DOCKER_IMAGE}:${CI_COMMIT_SHA} --json > snyk-container-results.json || true
+  artifacts:
+    paths:
+      - snyk-container-results.json
+    expire_in: 1 week
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+
+# ======= QUALITY SCAN STAGE =======
+# SonarQube code quality scan
+sonarqube_scan:
+  <<: *node_template
+  stage: quality_scan
+  needs: [unit_tests]
+  script:
+    # Install SonarScanner
+    - npm install -g sonarqube-scanner
+    # Run SonarQube scan
+    - sonar-scanner \
+        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+        -Dsonar.sources=. \
+        -Dsonar.host.url=${SONAR_HOST_URL} \
+        -Dsonar.login=${SONAR_TOKEN} \
+        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+        -Dsonar.exclusions=node_modules/**/*,test/**/*,**/*.test.js
+  allow_failure: true
+
+# ======= APPROVAL STAGE =======
+# Manual approval gate before deployment
+# This is implemented differently depending on the CI/CD platform:
+# - GitLab: Use the 'when: manual' directive
+# - GitHub Actions: Use environments with required reviewers
+# - Azure DevOps: Use approval gates
+# - Jenkins: Use input step in a pipeline
+
+approval_gate:
+  stage: approval
+  needs:
+    - unit_tests
+    - integration_tests
+    - snyk_scan
+    - sonarqube_scan
+  script:
+    - echo "Deployment approved"
+  # This makes the job a manual gate that requires explicit approval
+  when: manual
+  # Only require approval for production deployments
+  rules:
+    - if: $DEPLOYMENT_ENVIRONMENT == "production"
+      when: manual
+    - when: on_success
+
+# ======= DEPLOY STAGE =======
+# Blue-Green Deployment Strategy
+# This implementation creates a new "green" environment and switches traffic after validation
+
+# Step 1: Deploy to green environment
+deploy_green:
+  <<: *docker_template
+  stage: deploy
+  needs:
+    - approval_gate
+    - build_docker
+  variables:
+    DEPLOY_ENV: "green"
+  script:
+    # Pull the latest image
+    - docker pull ${DOCKER_IMAGE}:${CI_COMMIT_SHA}
+    
+    # Deploy to green environment (using kubectl, helm, or other deployment tools)
+    - echo "Deploying to GREEN environment..."
+    - echo "kubectl apply -f k8s/deployment-green.yaml --set image=${DOCKER_IMAGE}:${CI_COMMIT_SHA}"
+    
+    # Wait for deployment to be ready
+    - echo "kubectl rollout status deployment/${APP_NAME}-green -n ${DEPLOYMENT_ENVIRONMENT}"
+    
+    # Run smoke tests against green environment
+    - echo "Running smoke tests against GREEN environment..."
+    - echo "npm run test:smoke -- --url=https://${APP_NAME}-green.${DEPLOYMENT_ENVIRONMENT}.example.com"
+  environment:
+    name: ${DEPLOYMENT_ENVIRONMENT}-green
+    url: https://${APP_NAME}-green.${DEPLOYMENT_ENVIRONMENT}.example.com
+
+# Step 2: Switch traffic from blue to green
+switch_to_green:
+  <<: *docker_template
+  stage: deploy
+  needs:
+    - deploy_green
+  script:
+    # Update the service to point to the green deployment
+    - echo "Switching traffic from BLUE to GREEN environment..."
+    - echo "kubectl apply -f k8s/service-switch-to-green.yaml"
+    
+    # Verify the switch was successful
+    - echo "Verifying traffic switch..."
+    - echo "curl -s https://${APP_NAME}.${DEPLOYMENT_ENVIRONMENT}.example.com/health"
+  environment:
+    name: ${DEPLOYMENT_ENVIRONMENT}
+    url: https://${APP_NAME}.${DEPLOYMENT_ENVIRONMENT}.example.com
+
+# ======= POST DEPLOY STAGE =======
+# Cleanup old blue environment
+cleanup_blue:
+  <<: *docker_template
+  stage: post_deploy
+  needs:
+    - switch_to_green
+  script:
+    # Wait for a grace period to ensure no active connections to blue
+    - echo "Waiting for grace period before cleanup..."
+    - sleep 300
+    
+    # Scale down the old blue deployment
+    - echo "Scaling down BLUE environment..."
+    - echo "kubectl scale deployment/${APP_NAME}-blue -n ${DEPLOYMENT_ENVIRONMENT} --replicas=0"
+  environment:
+    name: ${DEPLOYMENT_ENVIRONMENT}-cleanup
+  # This job can be allowed to fail without affecting the pipeline
+  allow_failure: true
+  # Only run in production environment
+  rules:
+    - if: $DEPLOYMENT_ENVIRONMENT == "production"
+
+# Send Slack notification about deployment status
+slack_notification:
+  stage: post_deploy
+  image: alpine:latest
+  needs:
+    - switch_to_green
+  script:
+    # Install curl for API calls
+    - apk add --no-cache curl jq
+    
+    # Prepare the Slack message
+    - |
+      if [ "$CI_JOB_STATUS" == "success" ]; then
+        STATUS_EMOJI=":white_check_mark:"
+        STATUS_TEXT="Success"
+      else
+        STATUS_EMOJI=":x:"
+        STATUS_TEXT="Failed"
+      fi
+    
+    # Send notification to Slack
+    - |
+      curl -X POST \
+        -H "Content-type: application/json" \
+        --data "{
+          \"channel\": \"${SLACK_CHANNEL}\",
+          \"username\": \"Deployment Bot\",
+          \"text\": \"${STATUS_EMOJI} *${APP_NAME}* deployment to *${DEPLOYMENT_ENVIRONMENT}* ${STATUS_TEXT}\\n*Branch:* ${CI_COMMIT_BRANCH}\\n*Commit:* ${CI_COMMIT_SHA}\\n*Author:* ${CI_COMMIT_AUTHOR}\\n*Message:* ${CI_COMMIT_MESSAGE}\\n<${CI_PIPELINE_URL}|View Pipeline>\"
+        }" \
+        ${SLACK_WEBHOOK_URL}
+  # Always run this job, even if previous stages failed
+  when: always
+
+# ======= PIPELINE CONFIGURATION =======
+# This section contains additional pipeline configuration options
+
+# Cancel redundant pipelines
+# If a new pipeline is started for the same branch, cancel any running pipelines for that branch
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  # Cancel redundant pipelines
+  auto_cancel:
+    on_new_commit: interruptible

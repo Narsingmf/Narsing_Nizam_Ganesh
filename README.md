@@ -1,88 +1,113 @@
-# Terraform ECS Project
+# CI/CD Pipeline Templates
 
-This project contains Terraform code to create an ECS instance using best practices like code modularity and state management.
+This directory contains reusable CI/CD pipeline templates for various application types.
 
-## Project Structure
+## Node.js Application Pipeline Template
 
+The `nodejs-pipeline-template.yml` file provides a comprehensive CI/CD pipeline for Node.js applications with the following features:
+
+### Features
+
+- **Multi-stage Pipeline**: Build, Test, Security Scan, Quality Scan, Approval, Deploy, and Post-Deploy stages
+- **Code Quality**: SonarQube integration for code quality analysis
+- **Security Scanning**: Snyk integration for dependency and container vulnerability scanning
+- **Centralized Secrets Management**: Secure handling of sensitive information
+- **Approval Gates**: Manual approval required before production deployments
+- **Notifications**: Slack notifications for deployment status
+- **Optimizations**: 
+  - Parallel job execution for faster pipelines
+  - Caching of dependencies
+  - Cancellation of redundant pipeline runs
+- **Deployment Strategy**: Blue-Green deployment for zero-downtime releases
+
+### How to Use This Template
+
+1. **Copy the Template**: Copy the `nodejs-pipeline-template.yml` file to your project repository.
+
+2. **Configure Variables**: Update the variables section at the top of the file with your project-specific values.
+
+3. **Set Up Secrets**: Configure the following secrets in your CI/CD platform's secure storage:
+   - `DOCKER_REGISTRY_USER` and `DOCKER_REGISTRY_PASSWORD`: Docker registry credentials
+   - `SNYK_TOKEN`: API token for Snyk
+   - `SONAR_TOKEN`: API token for SonarQube
+   - `SLACK_WEBHOOK_URL`: Webhook URL for Slack notifications
+
+4. **Adapt for Your CI/CD Platform**: The template is designed to be adaptable to different CI/CD platforms:
+   - **GitLab CI**: Use as-is with minimal changes
+   - **GitHub Actions**: Convert job definitions to GitHub Actions workflow syntax
+   - **Azure DevOps**: Convert to Azure Pipelines YAML format
+   - **Jenkins**: Convert to Jenkinsfile format
+
+5. **Customize Jobs**: Modify the job scripts as needed for your specific application requirements.
+
+6. **Set Up Kubernetes Resources**: Create the necessary Kubernetes manifests in a `k8s` directory:
+   - `deployment-green.yaml`: Deployment configuration for the green environment
+   - `service-switch-to-green.yaml`: Service configuration to switch traffic to green
+
+### Example Usage with Different CI/CD Platforms
+
+#### GitLab CI
+
+```yaml
+include:
+  - local: 'ci/nodejs-pipeline-template.yml'
+
+variables:
+  APP_NAME: "my-nodejs-app"
+  NODE_VERSION: "18"
 ```
-.
-├── backend.tf          # State management configuration
-├── finalecs.tf         # Entry point file with documentation
-├── main.tf             # Main configuration file
-├── modules/            # Modular components
-│   ├── ecs/            # ECS cluster, service, task definition
-│   │   ├── main.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   ├── iam/            # IAM roles and policies
-│   │   ├── main.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   └── networking/     # VPC, subnets, security groups
-│       ├── main.tf
-│       ├── outputs.tf
-│       └── variables.tf
-├── outputs.tf          # Output values
-├── providers.tf        # Provider configuration
-├── README.md           # This file
-├── test/               # Test scripts
-│   └── test_terraform.sh
-└── variables.tf        # Input variables
+
+#### GitHub Actions
+
+Convert the template to GitHub Actions format and include it in your workflow:
+
+```yaml
+name: Node.js CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  include-pipeline:
+    uses: ./.github/workflows/nodejs-pipeline.yml
+    with:
+      app_name: "my-nodejs-app"
+      node_version: "18"
+    secrets: inherit
 ```
 
-## Features
+#### Azure DevOps
 
-- **Modular Design**: Code is organized into reusable modules
-- **Remote State Management**: Uses S3 backend with DynamoDB locking
-- **Scalable ECS Setup**: Includes auto-scaling configuration
-- **Networking**: Complete VPC setup with public and private subnets
-- **Security**: Proper IAM roles and security groups
+```yaml
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: YourProject/pipeline-templates
 
-## Prerequisites
-
-- AWS CLI configured with appropriate credentials
-- Terraform v1.0.0 or newer
-- S3 bucket and DynamoDB table for state management (see backend.tf)
-
-## Usage
-
-1. Initialize the Terraform configuration:
-   ```
-   terraform init
-   ```
-
-2. Review the execution plan:
-   ```
-   terraform plan
-   ```
-
-3. Apply the configuration:
-   ```
-   terraform apply
-   ```
-
-4. When finished, destroy the resources:
-   ```
-   terraform destroy
-   ```
-
-## State Management
-
-This project uses an S3 backend with DynamoDB locking for state management. Before initializing Terraform, you need to create:
-
-1. An S3 bucket for storing the state file
-2. A DynamoDB table for state locking
-
-You can create these resources using the AWS CLI commands commented in the `backend.tf` file.
-
-## Customization
-
-Modify the `variables.tf` file or create a `terraform.tfvars` file to customize the deployment according to your requirements.
-
-## Testing
-
-Run the test script to validate the Terraform configuration:
-
+stages:
+- template: ci/nodejs-pipeline-template.yml@templates
+  parameters:
+    appName: 'my-nodejs-app'
+    nodeVersion: '18'
 ```
-bash test/test_terraform.sh
-```
+
+### Customization
+
+The template is designed to be customizable. Common customization points include:
+
+- **Test Commands**: Update the test scripts to match your project's test commands
+- **Build Process**: Customize the build process for your specific Node.js framework
+- **Deployment Configuration**: Adjust the deployment scripts for your infrastructure
+- **Notification Content**: Customize the Slack notification message format
+
+### Best Practices
+
+- Keep secrets in your CI/CD platform's secure storage, never hardcode them
+- Regularly update dependencies to address security vulnerabilities
+- Use specific versions for tools and dependencies to ensure reproducible builds
+- Add comments to explain complex pipeline logic
+- Test pipeline changes in a development environment before applying to production
