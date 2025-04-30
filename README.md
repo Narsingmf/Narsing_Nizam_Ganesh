@@ -1,113 +1,199 @@
-# CI/CD Pipeline Templates
+# AWS ECS Infrastructure as Code with Terraform and CI/CD Pipeline
 
-This directory contains reusable CI/CD pipeline templates for various application types.
+This project provides a comprehensive Infrastructure as Code (IaC) solution for deploying containerized applications on AWS ECS (Elastic Container Service) with a complete CI/CD pipeline. It combines Terraform modules for infrastructure provisioning and a reusable Node.js pipeline template for automated deployments.
 
-## Node.js Application Pipeline Template
+The project implements a production-grade infrastructure with multi-AZ deployment, secure networking, auto-scaling capabilities, and blue-green deployment strategy. It features comprehensive monitoring, security scanning, and quality checks throughout the deployment pipeline. The modular design allows for easy customization and maintenance while following AWS best practices.
 
-The `nodejs-pipeline-template.yml` file provides a comprehensive CI/CD pipeline for Node.js applications with the following features:
-
-### Features
-
-- **Multi-stage Pipeline**: Build, Test, Security Scan, Quality Scan, Approval, Deploy, and Post-Deploy stages
-- **Code Quality**: SonarQube integration for code quality analysis
-- **Security Scanning**: Snyk integration for dependency and container vulnerability scanning
-- **Centralized Secrets Management**: Secure handling of sensitive information
-- **Approval Gates**: Manual approval required before production deployments
-- **Notifications**: Slack notifications for deployment status
-- **Optimizations**: 
-  - Parallel job execution for faster pipelines
-  - Caching of dependencies
-  - Cancellation of redundant pipeline runs
-- **Deployment Strategy**: Blue-Green deployment for zero-downtime releases
-
-### How to Use This Template
-
-1. **Copy the Template**: Copy the `nodejs-pipeline-template.yml` file to your project repository.
-
-2. **Configure Variables**: Update the variables section at the top of the file with your project-specific values.
-
-3. **Set Up Secrets**: Configure the following secrets in your CI/CD platform's secure storage:
-   - `DOCKER_REGISTRY_USER` and `DOCKER_REGISTRY_PASSWORD`: Docker registry credentials
-   - `SNYK_TOKEN`: API token for Snyk
-   - `SONAR_TOKEN`: API token for SonarQube
-   - `SLACK_WEBHOOK_URL`: Webhook URL for Slack notifications
-
-4. **Adapt for Your CI/CD Platform**: The template is designed to be adaptable to different CI/CD platforms:
-   - **GitLab CI**: Use as-is with minimal changes
-   - **GitHub Actions**: Convert job definitions to GitHub Actions workflow syntax
-   - **Azure DevOps**: Convert to Azure Pipelines YAML format
-   - **Jenkins**: Convert to Jenkinsfile format
-
-5. **Customize Jobs**: Modify the job scripts as needed for your specific application requirements.
-
-6. **Set Up Kubernetes Resources**: Create the necessary Kubernetes manifests in a `k8s` directory:
-   - `deployment-green.yaml`: Deployment configuration for the green environment
-   - `service-switch-to-green.yaml`: Service configuration to switch traffic to green
-
-### Example Usage with Different CI/CD Platforms
-
-#### GitLab CI
-
-```yaml
-include:
-  - local: 'ci/nodejs-pipeline-template.yml'
-
-variables:
-  APP_NAME: "my-nodejs-app"
-  NODE_VERSION: "18"
+## Repository Structure
+```
+.
+├── ci/                                 # CI/CD pipeline configurations
+│   └── nodejs-pipeline-template.yml    # Reusable Node.js pipeline template with blue-green deployment
+├── modules/                            # Terraform modules for infrastructure components
+│   ├── ecs/                           # ECS cluster, service, and task definitions
+│   ├── iam/                           # IAM roles and policies for ECS
+│   └── networking/                    # VPC, subnets, and security groups
+├── Narsing_Nizam_Ganesh/              # Main Terraform configuration
+│   ├── backend.tf                     # S3 backend configuration for state management
+│   ├── finalecs.tf                    # ECS deployment entry point
+│   ├── main.tf                        # Root module orchestrating all components
+│   └── variables.tf                   # Input variables for configuration
+└── test/                              # Testing utilities
+    └── test_terraform.sh              # Terraform configuration validation script
 ```
 
-#### GitHub Actions
+## Usage Instructions
+### Prerequisites
+- AWS CLI configured with appropriate credentials
+- Terraform >= 0.12.x
+- Node.js >= 18.x (for pipeline execution)
+- Docker (for container builds)
+- kubectl (for Kubernetes deployments)
+- yamllint (for pipeline template validation)
 
-Convert the template to GitHub Actions format and include it in your workflow:
+### Installation
 
-```yaml
-name: Node.js CI/CD
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  include-pipeline:
-    uses: ./.github/workflows/nodejs-pipeline.yml
-    with:
-      app_name: "my-nodejs-app"
-      node_version: "18"
-    secrets: inherit
+1. Clone the repository and initialize Terraform:
+```bash
+git clone <repository-url>
+cd <repository-name>
+terraform init
 ```
 
-#### Azure DevOps
-
-```yaml
-resources:
-  repositories:
-    - repository: templates
-      type: git
-      name: YourProject/pipeline-templates
-
-stages:
-- template: ci/nodejs-pipeline-template.yml@templates
-  parameters:
-    appName: 'my-nodejs-app'
-    nodeVersion: '18'
+2. Configure AWS credentials:
+```bash
+aws configure
 ```
 
-### Customization
+3. Create the S3 bucket for Terraform state:
+```bash
+aws s3 mb s3://terraform-state-ecs-project --region us-east-1
+```
 
-The template is designed to be customizable. Common customization points include:
+4. Create the DynamoDB table for state locking:
+```bash
+aws dynamodb create-table \
+  --table-name terraform-locks \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region us-east-1
+```
 
-- **Test Commands**: Update the test scripts to match your project's test commands
-- **Build Process**: Customize the build process for your specific Node.js framework
-- **Deployment Configuration**: Adjust the deployment scripts for your infrastructure
-- **Notification Content**: Customize the Slack notification message format
+### Quick Start
+1. Configure variables:
+```bash
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your desired values
+```
 
-### Best Practices
+2. Plan and apply the infrastructure:
+```bash
+terraform plan -out=tfplan
+terraform apply tfplan
+```
 
-- Keep secrets in your CI/CD platform's secure storage, never hardcode them
-- Regularly update dependencies to address security vulnerabilities
-- Use specific versions for tools and dependencies to ensure reproducible builds
-- Add comments to explain complex pipeline logic
-- Test pipeline changes in a development environment before applying to production
+### More Detailed Examples
+
+1. Deploying with custom VPC configuration:
+```hcl
+module "networking" {
+  source = "./modules/networking"
+  
+  environment = "prod"
+  vpc_cidr = "10.0.0.0/16"
+  availability_zones = ["us-east-1a", "us-east-1b"]
+  public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
+  private_subnet_cidrs = ["10.0.3.0/24", "10.0.4.0/24"]
+}
+```
+
+2. Configuring ECS service with auto-scaling:
+```hcl
+module "ecs" {
+  source = "./modules/ecs"
+  
+  environment = "prod"
+  cpu = 256
+  memory = 512
+  desired_count = 2
+  container_port = 80
+}
+```
+
+### Troubleshooting
+
+1. State Lock Issues
+```bash
+# Clear stuck state lock
+aws dynamodb delete-item \
+  --table-name terraform-locks \
+  --key '{"LockID": {"S": "terraform-state-lock-id"}}' \
+  --region us-east-1
+```
+
+2. ECS Service Deployment Issues
+- Check ECS service events:
+```bash
+aws ecs describe-services --cluster <cluster-name> --services <service-name>
+```
+- View container logs:
+```bash
+aws logs get-log-events --log-group-name /ecs/<service-name> --log-stream-name <container-id>
+```
+
+## Data Flow
+
+The infrastructure implements a secure multi-tier architecture with public and private subnets, where applications run in private subnets with controlled access through an Application Load Balancer.
+
+```ascii
+                                     ┌──────────────┐
+                                     │    Client    │
+                                     └──────┬───────┘
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────┐
+│                           VPC                                   │
+│  ┌─────────────┐      ┌──────────┐      ┌──────────────────┐  │
+│  │    ALB      │─────▶│   ECS    │─────▶│  Container Apps  │  │
+│  └─────────────┘      │ Service  │      └──────────────────┘  │
+│  (Public Subnet)      └──────────┘         (Private Subnet)    │
+└────────────────────────────────────────────────────────────────┘
+```
+
+Key component interactions:
+1. Client requests are received by the Application Load Balancer in public subnets
+2. ALB routes traffic to ECS tasks running in private subnets
+3. ECS tasks fetch container images and publish logs to CloudWatch
+4. Auto-scaling adjusts task count based on CPU/memory metrics
+5. NAT Gateway enables outbound internet access for private subnets
+6. IAM roles control permissions for task execution and container access
+7. Security groups manage inbound/outbound traffic rules
+
+## Infrastructure
+
+![Infrastructure diagram](./docs/infra.svg)
+
+### VPC Resources
+- VPC with DNS support and hostnames enabled
+- Internet Gateway for public subnet access
+- NAT Gateway for private subnet outbound traffic
+- Public and private subnets across multiple AZs
+- Route tables for traffic management
+
+### ECS Resources
+- ECS Cluster with Container Insights
+- Task Definition with CPU and memory specifications
+- ECS Service with desired task count and auto-scaling
+- Application Load Balancer with target groups
+- CloudWatch Log Groups for container logs
+
+### IAM Resources
+- ECS Task Execution Role for container operations
+- ECS Task Role for application permissions
+- Custom policies for CloudWatch Logs access
+
+## Deployment
+
+### Prerequisites
+- S3 bucket for Terraform state
+- DynamoDB table for state locking
+- AWS credentials with appropriate permissions
+
+### Deployment Steps
+1. Initialize Terraform backend
+2. Configure environment variables
+3. Apply Terraform configuration
+4. Verify ECS service deployment
+5. Configure CI/CD pipeline
+
+### Environment Configurations
+- Development: Single AZ, minimal resources
+- Staging: Multi-AZ, moderate resources
+- Production: Multi-AZ, high availability
+
+### Monitoring Setup
+- CloudWatch metrics for ECS tasks
+- Container Insights for detailed monitoring
+- ALB access logs for traffic analysis
+- Auto-scaling metrics and alarms

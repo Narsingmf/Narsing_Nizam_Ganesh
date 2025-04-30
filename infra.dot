@@ -1,0 +1,64 @@
+digraph INFRA {
+  node [ color = "black", fillcolor = "#E6E6E6", height =1, style = "filled,bold,rounded", fontname = "Arial" ];
+  "VPC" [ label = "VPC
+(AWS::EC2::VPC)", shape =rectangle ];
+  "InternetGateway" [ label = "InternetGateway
+(AWS::EC2::InternetGateway)", shape =rectangle ];
+  "PublicSubnets" [ label = "PublicSubnets
+(AWS::EC2::Subnet)", shape =rectangle ];
+  "PrivateSubnets" [ label = "PrivateSubnets
+(AWS::EC2::Subnet)", shape =rectangle ];
+  "NATGateway" [ label = "NATGateway
+(AWS::EC2::NatGateway)", shape =rectangle ];
+  "PublicRouteTable" [ label = "PublicRouteTable
+(AWS::EC2::RouteTable)", shape =rectangle ];
+  "PrivateRouteTable" [ label = "PrivateRouteTable
+(AWS::EC2::RouteTable)", shape =rectangle ];
+  "ECSTasksSecurityGroup" [ label = "ECSTasksSecurityGroup
+(AWS::EC2::SecurityGroup)", shape =rectangle ];
+  "ALBSecurityGroup" [ label = "ALBSecurityGroup
+(AWS::EC2::SecurityGroup)", shape =rectangle ];
+  "ECSCluster" [ label = "ECSCluster
+(AWS::ECS::Cluster)", shape =rectangle, fillcolor = "#B7E0FF" ];
+  "ECSTaskDefinition" [ label = "ECSTaskDefinition
+(AWS::ECS::TaskDefinition)", shape =rectangle, fillcolor = "#B7E0FF" ];
+  "ECSService" [ label = "ECSService
+(AWS::ECS::Service)", shape =rectangle, fillcolor = "#B7E0FF" ];
+  "ApplicationLoadBalancer" [ label = "ApplicationLoadBalancer
+(AWS::ElasticLoadBalancingV2::LoadBalancer)", shape =rectangle, fillcolor = "#E78F81" ];
+  "ALBTargetGroup" [ label = "ALBTargetGroup
+(AWS::ElasticLoadBalancingV2::TargetGroup)", shape =rectangle, fillcolor = "#E78F81" ];
+  "ALBListener" [ label = "ALBListener
+(AWS::ElasticLoadBalancingV2::Listener)", shape =rectangle, fillcolor = "#E78F81" ];
+  "ECSAutoScalingTarget" [ label = "ECSAutoScalingTarget
+(AWS::ApplicationAutoScaling::ScalableTarget)", shape =rectangle, fillcolor = "#B7E0FF" ];
+  "ECSAutoScalingPolicy" [ label = "ECSAutoScalingPolicy
+(AWS::ApplicationAutoScaling::ScalingPolicy)", shape =rectangle, fillcolor = "#B7E0FF" ];
+  "CloudWatchLogGroup" [ label = "CloudWatchLogGroup
+(AWS::Logs::LogGroup)", shape =rectangle ];
+  "ECSExecutionRole" [ label = "ECSExecutionRole
+(AWS::IAM::Role)", shape =rectangle ];
+  "ECSTaskRole" [ label = "ECSTaskRole
+(AWS::IAM::Role)", shape =rectangle ];
+  "InternetGateway" -> "VPC";
+  "PublicSubnets" -> "VPC";
+  "PrivateSubnets" -> "VPC";
+  "NATGateway" -> "PublicSubnets";
+  "PublicRouteTable" -> "VPC";
+  "PublicRouteTable" -> "InternetGateway";
+  "PrivateRouteTable" -> "VPC";
+  "PrivateRouteTable" -> "NATGateway";
+  "ECSTasksSecurityGroup" -> "VPC";
+  "ALBSecurityGroup" -> "VPC";
+  "ECSService" -> "ECSCluster";
+  "ECSService" -> "ECSTaskDefinition";
+  "ECSService" -> "PrivateSubnets";
+  "ECSService" -> "ECSTasksSecurityGroup";
+  "ApplicationLoadBalancer" -> "PublicSubnets";
+  "ApplicationLoadBalancer" -> "ALBSecurityGroup";
+  "ALBTargetGroup" -> "VPC";
+  "ALBListener" -> "ApplicationLoadBalancer";
+  "ALBListener" -> "ALBTargetGroup";
+  "ECSAutoScalingTarget" -> "ECSService";
+  "ECSAutoScalingPolicy" -> "ECSAutoScalingTarget";
+}
